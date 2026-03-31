@@ -91,6 +91,7 @@ class PulseAudioTrack {
   private startAtCtxTime = 0;
   private startOffsetSec = 0;
   private lookaheadId: number | null = null;
+  private nextTickBeat = 0;
 
   start(offset = 0): Promise<void> {
     return this.ensureContext().then(() => {
@@ -98,6 +99,8 @@ class PulseAudioTrack {
       this.stop();
       this.startOffsetSec = Math.max(0, offset);
       this.startAtCtxTime = this.context.currentTime - this.startOffsetSec;
+      const beat = 60 / demoChart.bpm;
+      this.nextTickBeat = Math.max(0, Math.ceil(this.startOffsetSec / beat));
       this.lookaheadId = window.setInterval(() => this.scheduleTicks(), 100);
     });
   }
@@ -146,13 +149,12 @@ class PulseAudioTrack {
     const horizon = nowSong + 0.2;
     const beat = 60 / demoChart.bpm;
 
-    const startBeatIndex = Math.floor(nowSong / beat);
-    const endBeatIndex = Math.floor(horizon / beat);
-    for (let i = startBeatIndex; i <= endBeatIndex; i += 1) {
-      const tickAt = i * beat;
-      if (tickAt < nowSong || tickAt < 0) continue;
-      if (Math.abs((nowSong % beat) - (tickAt % beat)) < 0.01) continue;
-      this.playTick(tickAt);
+    while (this.nextTickBeat * beat <= horizon) {
+      const tickAt = this.nextTickBeat * beat;
+      if (tickAt >= nowSong && tickAt >= 0) {
+        this.playTick(tickAt);
+      }
+      this.nextTickBeat += 1;
     }
   }
 
@@ -195,8 +197,6 @@ class RhythmGame {
   private state: ScoreState = this.makeFreshState();
   private songTime = 0;
   private noteSpeed = 320;
-  private travelDistance = 420;
-  private startLead = this.travelDistance / this.noteSpeed;
   private activeKeys = new Set<Lane>();
   private audio = new PulseAudioTrack();
   private raf = 0;
@@ -321,7 +321,9 @@ class RhythmGame {
 
   private hitLane(lane: Lane): void {
     const hitTime = this.audio.getSongTime();
-    const target = this.chart.notes.find((n) => !n.hit && n.lane === lane && Math.abs((n.time - hitTime) * 1000) <= HIT_WINDOW.good);
+    const target = this.chart.notes
+      .filter((n) => !n.hit && n.lane === lane && Math.abs((n.time - hitTime) * 1000) <= HIT_WINDOW.good)
+      .sort((a, b) => Math.abs(a.time - hitTime) - Math.abs(b.time - hitTime))[0];
 
     if (!target) {
       this.applyJudgment('Miss', null);
