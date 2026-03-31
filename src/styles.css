@@ -92,6 +92,23 @@ button:disabled {
   opacity: 0.55;
 }
 
+.song-btn {
+  width: 100%;
+  text-align: left;
+  margin-bottom: 6px;
+}
+
+.song-btn.selected {
+  border-color: #8de4cd;
+  background: #224a5a;
+}
+
+#actions {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 .meta-row {
   display: grid;
   grid-template-columns: 1fr auto;

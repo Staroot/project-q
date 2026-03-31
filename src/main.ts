@@ -1,8 +1,9 @@
 import './styles.css';
+import demoAudioChartJson from './charts/demo-audio.json';
 
 type Lane = 0 | 1 | 2 | 3;
 type Judgment = 'Perfect' | 'Good' | 'Miss';
-type Scene = 'start' | 'playing' | 'paused' | 'result';
+type Scene = 'start' | 'settings' | 'playing' | 'paused' | 'result';
 
 interface ChartNote {
   lane: Lane;
@@ -19,6 +20,15 @@ interface Chart {
   previewText: string;
   notes: ChartNote[];
   duration: number;
+  audioPath?: string;
+  audioAssetId?: string;
+}
+
+interface SongDefinition {
+  id: string;
+  label: string;
+  mode: 'file' | 'generated';
+  chart: Chart;
 }
 
 interface HitWindow {
@@ -43,6 +53,20 @@ interface ScoreState {
   lastJudgment: Judgment | null;
 }
 
+interface AudioTrack {
+  start(offset: number): Promise<void>;
+  pause(currentSongTime: number): void;
+  resume(): Promise<void>;
+  stop(): void;
+  getSongTime(): number;
+}
+
+interface PlayerSettings {
+  timingOffsetMs: number;
+  selectedSongIndex: number;
+  noteSpeed: number;
+}
+
 const LANES = 4;
 const KEYMAP: Record<string, Lane> = {
   d: 0,
@@ -53,23 +77,130 @@ const KEYMAP: Record<string, Lane> = {
 
 const LANE_COLORS = ['#57b5ff', '#4ef2cd', '#ffd166', '#ff7fb0'];
 const HIT_WINDOW: HitWindow = { perfect: 50, good: 110 };
+const SETTINGS_KEY = 'project-q-settings-v1';
+const OFFSET_STEP_MS = 10;
+const OFFSET_MIN_MS = -250;
+const OFFSET_MAX_MS = 250;
+const NOTE_SPEED_MIN = 220;
+const NOTE_SPEED_MAX = 420;
+const NOTE_SPEED_STEP = 20;
+const AUDIO_SAMPLE_RATE = 22050;
+const AUDIO_DURATION_SEC = 24;
+const audioAssetCache = new Map<string, string>();
 
-const demoChart: Chart = {
-  id: 'demo-001',
-  title: 'Pulse Training Pattern',
-  artist: 'Generated Tone Track',
-  bpm: 120,
-  offset: 1.0,
-  previewText: 'Simple, evenly spaced notes for timing practice.',
-  duration: 34,
-  notes: buildDemoNotes()
-};
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
 
-function buildDemoNotes(): ChartNote[] {
+function loadSettings(): PlayerSettings {
+  const fallback: PlayerSettings = {
+    timingOffsetMs: 0,
+    selectedSongIndex: 0,
+    noteSpeed: 320
+  };
+
+  const raw = window.localStorage.getItem(SETTINGS_KEY);
+  if (!raw) return fallback;
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<PlayerSettings>;
+    return {
+      timingOffsetMs: clamp(Math.round(parsed.timingOffsetMs ?? fallback.timingOffsetMs), OFFSET_MIN_MS, OFFSET_MAX_MS),
+      selectedSongIndex: Math.max(0, Math.round(parsed.selectedSongIndex ?? fallback.selectedSongIndex)),
+      noteSpeed: clamp(Math.round(parsed.noteSpeed ?? fallback.noteSpeed), NOTE_SPEED_MIN, NOTE_SPEED_MAX)
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function floatTo16BitPcm(sample: number): number {
+  const clamped = Math.max(-1, Math.min(1, sample));
+  return clamped < 0 ? Math.round(clamped * 32768) : Math.round(clamped * 32767);
+}
+
+function createDemoPulseWavObjectUrl(): string {
+  const sampleCount = Math.floor(AUDIO_SAMPLE_RATE * AUDIO_DURATION_SEC);
+  const dataSize = sampleCount * 2;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+
+  const writeString = (offset: number, value: string): void => {
+    for (let i = 0; i < value.length; i += 1) {
+      view.setUint8(offset + i, value.charCodeAt(i));
+    }
+  };
+
+  writeString(0, 'RIFF');
+  view.setUint32(4, 36 + dataSize, true);
+  writeString(8, 'WAVE');
+  writeString(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, AUDIO_SAMPLE_RATE, true);
+  view.setUint32(28, AUDIO_SAMPLE_RATE * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeString(36, 'data');
+  view.setUint32(40, dataSize, true);
+
+  const beatSec = 0.5;
+  const leadIn = 1.0;
+  let byteOffset = 44;
+  for (let i = 0; i < sampleCount; i += 1) {
+    const t = i / AUDIO_SAMPLE_RATE;
+    let value = 0;
+    value += 0.08 * Math.sin(2 * Math.PI * 220 * t);
+    value += 0.05 * Math.sin(2 * Math.PI * 330 * t);
+
+    if (t >= leadIn) {
+      const beatIndex = Math.round((t - leadIn) / beatSec);
+      const beatTime = leadIn + beatIndex * beatSec;
+      const dt = t - beatTime;
+      if (dt >= 0 && dt < 0.06) {
+        const env = Math.exp(-dt * 40);
+        const frequency = beatIndex % 4 === 0 ? 880 : 660;
+        value += 0.35 * env * Math.sin(2 * Math.PI * frequency * t);
+      }
+
+      const measureTime = (t - leadIn) % (beatSec * 4);
+      if (measureTime >= 0 && measureTime < 0.18) {
+        const env = Math.exp(-measureTime * 14);
+        const sweepFreq = 440 + 120 * Math.sin(2 * Math.PI * 0.5 * t);
+        value += 0.12 * env * Math.sin(2 * Math.PI * sweepFreq * t);
+      }
+    }
+
+    view.setInt16(byteOffset, floatTo16BitPcm(value), true);
+    byteOffset += 2;
+  }
+
+  const wavBlob = new Blob([buffer], { type: 'audio/wav' });
+  return URL.createObjectURL(wavBlob);
+}
+
+function resolveAudioAsset(assetId: string): string {
+  const cached = audioAssetCache.get(assetId);
+  if (cached) return cached;
+
+  let objectUrl: string;
+  if (assetId === 'demo-pulse-text-v1') {
+    objectUrl = createDemoPulseWavObjectUrl();
+  } else {
+    throw new Error(`Unknown audio asset id: ${assetId}`);
+  }
+
+  audioAssetCache.set(assetId, objectUrl);
+  return objectUrl;
+}
+
+function buildGeneratedNotes(): ChartNote[] {
   const notes: ChartNote[] = [];
   const beat = 60 / 120;
   const start = 2;
   const measures = 16;
+
   for (let m = 0; m < measures; m += 1) {
     const t = start + m * beat * 2;
     notes.push({ lane: (m % 4) as Lane, time: t });
@@ -86,12 +217,66 @@ function buildDemoNotes(): ChartNote[] {
   return notes.sort((a, b) => a.time - b.time);
 }
 
-class PulseAudioTrack {
+function asChart(input: unknown): Chart {
+  const data = input as Partial<Chart>;
+  if (!data || !Array.isArray(data.notes)) {
+    throw new Error('Invalid chart data: notes missing');
+  }
+
+  const notes: ChartNote[] = data.notes
+    .filter((note): note is ChartNote => {
+      const laneValid = note.lane === 0 || note.lane === 1 || note.lane === 2 || note.lane === 3;
+      return laneValid && typeof note.time === 'number';
+    })
+    .sort((a, b) => a.time - b.time)
+    .map((note) => ({ lane: note.lane, time: note.time }));
+
+  return {
+    id: data.id ?? 'unknown-chart',
+    title: data.title ?? 'Untitled',
+    artist: data.artist ?? 'Unknown Artist',
+    bpm: typeof data.bpm === 'number' ? data.bpm : 120,
+    offset: typeof data.offset === 'number' ? data.offset : 0,
+    previewText: data.previewText ?? 'No preview description.',
+    duration: typeof data.duration === 'number' ? data.duration : 30,
+    audioPath: data.audioPath,
+    audioAssetId: data.audioAssetId,
+    notes
+  };
+}
+
+const builtInSongs: SongDefinition[] = [
+  {
+    id: 'audio-demo',
+    label: 'Built-in WAV Demo',
+    mode: 'file',
+    chart: asChart(demoAudioChartJson)
+  },
+  {
+    id: 'generated-demo',
+    label: 'Generated Tick Fallback',
+    mode: 'generated',
+    chart: {
+      id: 'generated-001',
+      title: 'Pulse Training Pattern',
+      artist: 'Generated Tone Track',
+      bpm: 120,
+      offset: 1.0,
+      previewText: 'Generated fallback mode with metronome-like ticks.',
+      duration: 34,
+      notes: buildGeneratedNotes()
+    }
+  }
+];
+
+class PulseAudioTrack implements AudioTrack {
   private context: AudioContext | null = null;
   private startAtCtxTime = 0;
   private startOffsetSec = 0;
   private lookaheadId: number | null = null;
   private nextTickBeat = 0;
+
+  constructor(private readonly bpm: number) {}
 
   start(offset = 0): Promise<void> {
     return this.ensureContext().then(() => {
@@ -99,7 +284,7 @@ class PulseAudioTrack {
       this.stop();
       this.startOffsetSec = Math.max(0, offset);
       this.startAtCtxTime = this.context.currentTime - this.startOffsetSec;
-      const beat = 60 / demoChart.bpm;
+      const beat = 60 / this.bpm;
       this.nextTickBeat = Math.max(0, Math.ceil(this.startOffsetSec / beat));
       this.lookaheadId = window.setInterval(() => this.scheduleTicks(), 100);
     });
@@ -112,13 +297,6 @@ class PulseAudioTrack {
 
   resume(): Promise<void> {
     return this.start(this.startOffsetSec);
-  }
-
-  seek(time: number): void {
-    this.startOffsetSec = Math.max(0, time);
-    if (this.lookaheadId !== null) {
-      this.start(this.startOffsetSec);
-    }
   }
 
   getSongTime(): number {
@@ -147,7 +325,7 @@ class PulseAudioTrack {
     if (!this.context || this.lookaheadId === null) return;
     const nowSong = this.getSongTime();
     const horizon = nowSong + 0.2;
-    const beat = 60 / demoChart.bpm;
+    const beat = 60 / this.bpm;
 
     while (this.nextTickBeat * beat <= horizon) {
       const tickAt = this.nextTickBeat * beat;
@@ -166,7 +344,7 @@ class PulseAudioTrack {
     const osc = this.context.createOscillator();
     const gain = this.context.createGain();
     osc.type = 'square';
-    osc.frequency.value = Math.round(songTime / (60 / demoChart.bpm)) % 4 === 0 ? 880 : 550;
+    osc.frequency.value = Math.round(songTime / (60 / this.bpm)) % 4 === 0 ? 880 : 550;
 
     gain.gain.setValueAtTime(0.0001, when);
     gain.gain.exponentialRampToValueAtTime(0.08, when + 0.005);
@@ -175,6 +353,37 @@ class PulseAudioTrack {
     osc.connect(gain).connect(this.context.destination);
     osc.start(when);
     osc.stop(when + 0.09);
+  }
+}
+
+class FileAudioTrack implements AudioTrack {
+  private readonly audio: HTMLAudioElement;
+
+  constructor(audioPath: string) {
+    this.audio = new Audio(audioPath);
+    this.audio.preload = 'auto';
+  }
+
+  async start(offset: number): Promise<void> {
+    this.stop();
+    this.audio.currentTime = Math.max(0, offset);
+    await this.audio.play();
+  }
+
+  pause(_currentSongTime: number): void {
+    this.audio.pause();
+  }
+
+  async resume(): Promise<void> {
+    await this.audio.play();
+  }
+
+  stop(): void {
+    this.audio.pause();
+  }
+
+  getSongTime(): number {
+    return this.audio.currentTime;
   }
 }
 
@@ -193,12 +402,17 @@ class RhythmGame {
   };
 
   private scene: Scene = 'start';
-  private chart: Chart = demoChart;
+  private selectedSongIndex = 0;
+  private chart: Chart = builtInSongs[0].chart;
+  private runtimeNotes: ChartNote[] = [];
   private state: ScoreState = this.makeFreshState();
   private songTime = 0;
-  private noteSpeed = 320;
+  private settings: PlayerSettings = loadSettings();
+  private noteSpeed = this.settings.noteSpeed;
   private activeKeys = new Set<Lane>();
-  private audio = new PulseAudioTrack();
+  private audio: AudioTrack = new PulseAudioTrack(this.chart.bpm);
+  private calibrationPreviewTrack: PulseAudioTrack | null = null;
+  private calibrationPreviewTimer: number | null = null;
   private raf = 0;
 
   constructor(root: HTMLElement) {
@@ -235,9 +449,58 @@ class RhythmGame {
       actions: root.querySelector('#actions') as HTMLElement
     };
 
+    this.setSong(clamp(this.settings.selectedSongIndex, 0, builtInSongs.length - 1));
     this.bindKeys();
     this.renderUi();
     this.loop();
+  }
+
+  private setSong(index: number): void {
+    this.selectedSongIndex = clamp(index, 0, builtInSongs.length - 1);
+    this.chart = builtInSongs[this.selectedSongIndex].chart;
+    this.runtimeNotes = this.chart.notes.map((note) => ({ ...note }));
+    this.audio.stop();
+
+    const selection = builtInSongs[this.selectedSongIndex];
+    if (selection.mode === 'file' && (this.chart.audioAssetId || this.chart.audioPath)) {
+      const source = this.chart.audioAssetId ? resolveAudioAsset(this.chart.audioAssetId) : this.chart.audioPath;
+      if (!source) throw new Error(`Song ${this.chart.id} is missing an audio source`);
+      this.audio = new FileAudioTrack(source);
+    } else {
+      this.audio = new PulseAudioTrack(this.chart.bpm);
+    }
+    this.songTime = 0;
+    this.settings.selectedSongIndex = this.selectedSongIndex;
+    this.saveSettings();
+  }
+
+  private saveSettings(): void {
+    window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(this.settings));
+  }
+
+  private getTimingAdjustedSongTime(): number {
+    return this.audio.getSongTime() + this.settings.timingOffsetMs / 1000;
+  }
+
+  private stopCalibrationPreview(): void {
+    if (this.calibrationPreviewTimer !== null) {
+      window.clearTimeout(this.calibrationPreviewTimer);
+      this.calibrationPreviewTimer = null;
+    }
+    this.calibrationPreviewTrack?.stop();
+    this.calibrationPreviewTrack = null;
+  }
+
+  private async playCalibrationPreview(): Promise<void> {
+    this.stopCalibrationPreview();
+    const track = new PulseAudioTrack(120);
+    this.calibrationPreviewTrack = track;
+    await track.start(0);
+    this.calibrationPreviewTimer = window.setTimeout(() => {
+      this.stopCalibrationPreview();
+      this.renderUi();
+    }, 8000);
+    this.renderUi();
   }
 
   private makeFreshState(): ScoreState {
@@ -260,6 +523,13 @@ class RhythmGame {
 
       if (key === 'enter' && this.scene === 'start') {
         void this.startGame();
+        return;
+      }
+
+      if (key === 'escape' && this.scene === 'settings') {
+        this.stopCalibrationPreview();
+        this.scene = 'start';
+        this.renderUi();
         return;
       }
 
@@ -291,7 +561,8 @@ class RhythmGame {
   }
 
   private async startGame(): Promise<void> {
-    this.chart.notes.forEach((n) => delete n.hit);
+    this.stopCalibrationPreview();
+    this.runtimeNotes = this.chart.notes.map((note) => ({ ...note }));
     this.state = this.makeFreshState();
     this.songTime = 0;
     this.scene = 'playing';
@@ -320,8 +591,8 @@ class RhythmGame {
   }
 
   private hitLane(lane: Lane): void {
-    const hitTime = this.audio.getSongTime();
-    const target = this.chart.notes
+    const hitTime = this.getTimingAdjustedSongTime();
+    const target = this.runtimeNotes
       .filter((n) => !n.hit && n.lane === lane && Math.abs((n.time - hitTime) * 1000) <= HIT_WINDOW.good)
       .sort((a, b) => Math.abs(a.time - hitTime) - Math.abs(b.time - hitTime))[0];
 
@@ -367,17 +638,18 @@ class RhythmGame {
   private update(): void {
     if (this.scene !== 'playing') return;
     this.songTime = this.audio.getSongTime();
+    const adjustedSongTime = this.getTimingAdjustedSongTime();
 
-    for (const note of this.chart.notes) {
+    for (const note of this.runtimeNotes) {
       if (note.hit) continue;
-      const deltaMs = (this.songTime - note.time) * 1000;
+      const deltaMs = (adjustedSongTime - note.time) * 1000;
       if (deltaMs > HIT_WINDOW.good) {
         note.hit = true;
         this.applyJudgment('Miss', null);
       }
     }
 
-    const allResolved = this.chart.notes.every((n) => n.hit);
+    const allResolved = this.runtimeNotes.every((n) => n.hit);
     const timedOut = this.songTime > this.chart.duration;
     if (allResolved || timedOut || this.state.health <= 0) {
       this.endGame();
@@ -397,13 +669,82 @@ class RhythmGame {
     this.ui.acc.textContent = `${this.getAccuracy().toFixed(2)}%`;
     this.ui.health.textContent = `${Math.floor(this.state.health)}`;
     this.ui.last.textContent = this.state.lastJudgment ?? '-';
-    this.ui.info.textContent = `${this.chart.title} — ${this.chart.artist} | BPM ${this.chart.bpm}`;
+
+    const selectedSong = builtInSongs[this.selectedSongIndex];
+    const offsetLabel = this.settings.timingOffsetMs >= 0 ? `+${this.settings.timingOffsetMs}` : `${this.settings.timingOffsetMs}`;
+    this.ui.info.textContent = `${this.chart.title} — ${this.chart.artist} | BPM ${this.chart.bpm} | ${selectedSong.label} | Offset ${offsetLabel}ms`;
 
     if (this.scene === 'start') {
-      this.ui.scene.innerHTML = `<h2>Start</h2><p>${this.chart.previewText}</p><p>Press Enter or click start.</p>`;
-      this.ui.actions.innerHTML = `<button id="start-btn">Start Demo Song</button>`;
+      const songButtons = builtInSongs
+        .map(
+          (song, index) =>
+            `<button class="song-btn ${index === this.selectedSongIndex ? 'selected' : ''}" data-song-index="${index}">${song.label}</button>`
+        )
+        .join('');
+      this.ui.scene.innerHTML = `<h2>Start</h2><p>${this.chart.previewText}</p><p>Pick a song and press Enter or click start.</p>`;
+      this.ui.actions.innerHTML = `${songButtons}<button id="start-btn">Start Selected Song</button> <button id="settings-btn">Settings / Calibration</button>`;
+
+      this.ui.actions.querySelectorAll<HTMLButtonElement>('.song-btn').forEach((button) => {
+        button.onclick = () => {
+          const index = Number(button.dataset.songIndex ?? 0);
+          this.setSong(index);
+          this.renderUi();
+        };
+      });
+
       (this.ui.actions.querySelector('#start-btn') as HTMLButtonElement).onclick = () => {
         void this.startGame();
+      };
+      (this.ui.actions.querySelector('#settings-btn') as HTMLButtonElement).onclick = () => {
+        this.scene = 'settings';
+        this.renderUi();
+      };
+    } else if (this.scene === 'settings') {
+      const previewStatus = this.calibrationPreviewTrack ? 'Preview ticks: playing' : 'Preview ticks: stopped';
+      this.ui.scene.innerHTML = `
+        <h2>Settings / Calibration</h2>
+        <p>Adjust global timing offset and retry until notes feel aligned.</p>
+        <p><strong>Timing Offset:</strong> ${offsetLabel}ms</p>
+        <p><strong>Note Speed:</strong> ${this.noteSpeed}</p>
+        <p>${previewStatus}</p>
+        <p>Tip: if your hits feel late, increase offset. If early, decrease.</p>`;
+      this.ui.actions.innerHTML = `
+        <button id="offset-minus">Offset -${OFFSET_STEP_MS}ms</button>
+        <button id="offset-plus">Offset +${OFFSET_STEP_MS}ms</button>
+        <button id="speed-minus">Speed -${NOTE_SPEED_STEP}</button>
+        <button id="speed-plus">Speed +${NOTE_SPEED_STEP}</button>
+        <button id="preview-btn">${this.calibrationPreviewTrack ? 'Restart' : 'Play'} Test Ticks</button>
+        <button id="back-btn">Back to Start</button>`;
+
+      (this.ui.actions.querySelector('#offset-minus') as HTMLButtonElement).onclick = () => {
+        this.settings.timingOffsetMs = clamp(this.settings.timingOffsetMs - OFFSET_STEP_MS, OFFSET_MIN_MS, OFFSET_MAX_MS);
+        this.saveSettings();
+        this.renderUi();
+      };
+      (this.ui.actions.querySelector('#offset-plus') as HTMLButtonElement).onclick = () => {
+        this.settings.timingOffsetMs = clamp(this.settings.timingOffsetMs + OFFSET_STEP_MS, OFFSET_MIN_MS, OFFSET_MAX_MS);
+        this.saveSettings();
+        this.renderUi();
+      };
+      (this.ui.actions.querySelector('#speed-minus') as HTMLButtonElement).onclick = () => {
+        this.noteSpeed = clamp(this.noteSpeed - NOTE_SPEED_STEP, NOTE_SPEED_MIN, NOTE_SPEED_MAX);
+        this.settings.noteSpeed = this.noteSpeed;
+        this.saveSettings();
+        this.renderUi();
+      };
+      (this.ui.actions.querySelector('#speed-plus') as HTMLButtonElement).onclick = () => {
+        this.noteSpeed = clamp(this.noteSpeed + NOTE_SPEED_STEP, NOTE_SPEED_MIN, NOTE_SPEED_MAX);
+        this.settings.noteSpeed = this.noteSpeed;
+        this.saveSettings();
+        this.renderUi();
+      };
+      (this.ui.actions.querySelector('#preview-btn') as HTMLButtonElement).onclick = () => {
+        void this.playCalibrationPreview();
+      };
+      (this.ui.actions.querySelector('#back-btn') as HTMLButtonElement).onclick = () => {
+        this.stopCalibrationPreview();
+        this.scene = 'start';
+        this.renderUi();
       };
     } else if (this.scene === 'playing') {
       this.ui.scene.innerHTML = '<h2>Playing</h2><p>Press Esc to pause, R to restart.</p>';
@@ -467,7 +808,7 @@ class RhythmGame {
     this.ctx.fillStyle = '#f5f7ff';
     this.ctx.fillRect(0, receptorY, width, 6);
 
-    for (const note of this.chart.notes) {
+    for (const note of this.runtimeNotes) {
       if (note.hit) continue;
       const tUntilHit = note.time - this.songTime;
       const y = receptorY - tUntilHit * this.noteSpeed;
@@ -486,6 +827,8 @@ class RhythmGame {
 
     if (this.scene === 'start') {
       this.drawOverlay('Press Enter to Start');
+    } else if (this.scene === 'settings') {
+      this.drawOverlay('Settings');
     } else if (this.scene === 'paused') {
       this.drawOverlay('Paused');
     } else if (this.scene === 'result') {
@@ -512,6 +855,11 @@ class RhythmGame {
   destroy(): void {
     window.cancelAnimationFrame(this.raf);
     this.audio.stop();
+    this.stopCalibrationPreview();
+    for (const objectUrl of audioAssetCache.values()) {
+      URL.revokeObjectURL(objectUrl);
+    }
+    audioAssetCache.clear();
   }
 }
 
