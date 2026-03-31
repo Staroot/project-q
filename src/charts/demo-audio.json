@@ -1,0 +1,252 @@
+{
+  "id": "demo-audio-001",
+  "title": "Sunset Circuit (Demo)",
+  "artist": "Project Q Original",
+  "bpm": 120,
+  "offset": 1.0,
+  "duration": 22.5,
+  "audioAssetId": "demo-pulse-text-v1",
+  "previewText": "Built-in WAV demo song synced to a simple training chart.",
+  "notes": [
+    {
+      "lane": 0,
+      "time": 2.0
+    },
+    {
+      "lane": 1,
+      "time": 2.5
+    },
+    {
+      "lane": 1,
+      "time": 2.75
+    },
+    {
+      "lane": 1,
+      "time": 3.0
+    },
+    {
+      "lane": 2,
+      "time": 3.5
+    },
+    {
+      "lane": 2,
+      "time": 4.0
+    },
+    {
+      "lane": 3,
+      "time": 4.5
+    },
+    {
+      "lane": 1,
+      "time": 4.75
+    },
+    {
+      "lane": 3,
+      "time": 5.0
+    },
+    {
+      "lane": 0,
+      "time": 5.5
+    },
+    {
+      "lane": 2,
+      "time": 5.25
+    },
+    {
+      "lane": 3,
+      "time": 5.25
+    },
+    {
+      "lane": 0,
+      "time": 6.0
+    },
+    {
+      "lane": 1,
+      "time": 6.5
+    },
+    {
+      "lane": 1,
+      "time": 6.75
+    },
+    {
+      "lane": 1,
+      "time": 7.0
+    },
+    {
+      "lane": 2,
+      "time": 7.5
+    },
+    {
+      "lane": 2,
+      "time": 8.0
+    },
+    {
+      "lane": 3,
+      "time": 8.5
+    },
+    {
+      "lane": 1,
+      "time": 8.75
+    },
+    {
+      "lane": 3,
+      "time": 9.0
+    },
+    {
+      "lane": 0,
+      "time": 9.5
+    },
+    {
+      "lane": 2,
+      "time": 9.25
+    },
+    {
+      "lane": 3,
+      "time": 9.25
+    },
+    {
+      "lane": 0,
+      "time": 10.0
+    },
+    {
+      "lane": 1,
+      "time": 10.5
+    },
+    {
+      "lane": 1,
+      "time": 10.75
+    },
+    {
+      "lane": 1,
+      "time": 11.0
+    },
+    {
+      "lane": 2,
+      "time": 11.5
+    },
+    {
+      "lane": 2,
+      "time": 12.0
+    },
+    {
+      "lane": 3,
+      "time": 12.5
+    },
+    {
+      "lane": 1,
+      "time": 12.75
+    },
+    {
+      "lane": 3,
+      "time": 13.0
+    },
+    {
+      "lane": 0,
+      "time": 13.5
+    },
+    {
+      "lane": 2,
+      "time": 13.25
+    },
+    {
+      "lane": 3,
+      "time": 13.25
+    },
+    {
+      "lane": 0,
+      "time": 14.0
+    },
+    {
+      "lane": 1,
+      "time": 14.5
+    },
+    {
+      "lane": 1,
+      "time": 14.75
+    },
+    {
+      "lane": 1,
+      "time": 15.0
+    },
+    {
+      "lane": 2,
+      "time": 15.5
+    },
+    {
+      "lane": 2,
+      "time": 16.0
+    },
+    {
+      "lane": 3,
+      "time": 16.5
+    },
+    {
+      "lane": 1,
+      "time": 16.75
+    },
+    {
+      "lane": 3,
+      "time": 17.0
+    },
+    {
+      "lane": 0,
+      "time": 17.5
+    },
+    {
+      "lane": 2,
+      "time": 17.25
+    },
+    {
+      "lane": 3,
+      "time": 17.25
+    },
+    {
+      "lane": 0,
+      "time": 18.0
+    },
+    {
+      "lane": 1,
+      "time": 18.5
+    },
+    {
+      "lane": 1,
+      "time": 18.75
+    },
+    {
+      "lane": 1,
+      "time": 19.0
+    },
+    {
+      "lane": 2,
+      "time": 19.5
+    },
+    {
+      "lane": 2,
+      "time": 20.0
+    },
+    {
+      "lane": 3,
+      "time": 20.5
+    },
+    {
+      "lane": 1,
+      "time": 20.75
+    },
+    {
+      "lane": 3,
+      "time": 21.0
+    },
+    {
+      "lane": 0,
+      "time": 21.5
+    },
+    {
+      "lane": 2,
+      "time": 21.25
+    },
+    {
+      "lane": 3,
+      "time": 21.25
+    }
+  ]
+}
